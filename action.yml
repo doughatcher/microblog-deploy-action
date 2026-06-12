@@ -1,0 +1,89 @@
+name: 'Deploy Hugo theme to Micro.blog'
+description: >-
+  Authenticate to Micro.blog via an email magic-link and deploy a Hugo theme to
+  a hosted Micro.blog site. Caches the session so it only emails a sign-in link
+  when the cached cookie has expired.
+author: 'Doug Hatcher (doughatcher)'
+branding:
+  icon: 'upload-cloud'
+  color: 'orange'
+
+inputs:
+  microblog-email:
+    description: 'Micro.blog account email — where the sign-in link is sent.'
+    required: true
+  gmail-email:
+    description: 'Gmail address that receives the sign-in email (read over IMAP).'
+    required: true
+  gmail-app-password:
+    description: 'Gmail App Password for IMAP access. Pass via a secret, never inline.'
+    required: true
+  site-id:
+    description: 'Micro.blog site ID to deploy to.'
+    required: true
+  theme-id:
+    description: 'Micro.blog theme ID to update.'
+    required: true
+  deploy-args:
+    description: 'Extra args passed to microblog_deploy.py.'
+    required: false
+    default: '--all --timeout 120'
+  python-version:
+    description: 'Python version to set up.'
+    required: false
+    default: '3.12'
+
+outputs:
+  deployed:
+    description: '"true" when the deploy step completed.'
+    value: ${{ steps.deploy.outputs.deployed }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install dependencies
+      shell: bash
+      run: pip install -r "${{ github.action_path }}/requirements.txt"
+
+    # Reuse a cached .session-cookie (see examples/ for the actions/cache step)
+    # so we don't email a sign-in link on every run.
+    - name: Validate cached session
+      id: session
+      shell: bash
+      continue-on-error: true
+      env:
+        MICROBLOG_EMAIL: ${{ inputs.microblog-email }}
+        MICROBLOG_SITE_ID: ${{ inputs.site-id }}
+        MICROBLOG_THEME_ID: ${{ inputs.theme-id }}
+      run: |
+        if [ -f .session-cookie ] && \
+           python "${{ github.action_path }}/microblog_deploy.py" --validate-only; then
+          echo "valid=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "valid=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Authenticate (only if no valid session)
+      if: steps.session.outputs.valid != 'true'
+      shell: bash
+      env:
+        MICROBLOG_EMAIL: ${{ inputs.microblog-email }}
+        GMAIL_EMAIL: ${{ inputs.gmail-email }}
+        GMAIL_APP_PASSWORD: ${{ inputs.gmail-app-password }}
+      run: python "${{ github.action_path }}/microblog_auth.py"
+
+    - name: Deploy theme
+      id: deploy
+      shell: bash
+      env:
+        MICROBLOG_EMAIL: ${{ inputs.microblog-email }}
+        MICROBLOG_SITE_ID: ${{ inputs.site-id }}
+        MICROBLOG_THEME_ID: ${{ inputs.theme-id }}
+      run: |
+        python "${{ github.action_path }}/microblog_deploy.py" ${{ inputs.deploy-args }}
+        echo "deployed=true" >> "$GITHUB_OUTPUT"

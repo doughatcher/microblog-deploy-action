@@ -1,0 +1,38 @@
+# Example caller workflow — drop into a Hugo theme repo's .github/workflows/.
+
+name: Deploy to Micro.blog
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'layouts/**'
+      - 'static/**'
+      - 'theme.toml'
+      - 'plugin.json'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cache the Micro.blog session cookie so we only email a sign-in link when
+      # it has expired. Daily key rotation forces a fresh login once per day.
+      - name: Restore session cookie
+        uses: actions/cache@v4
+        with:
+          path: .session-cookie
+          key: microblog-session-${{ github.run_id }}
+          restore-keys: |
+            microblog-session-
+
+      - name: Deploy theme to Micro.blog
+        uses: doughatcher/microblog-deploy-action@v1
+        with:
+          microblog-email: ${{ vars.MICROBLOG_EMAIL }}
+          gmail-email: ${{ vars.GMAIL_EMAIL }}
+          gmail-app-password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          site-id: ${{ vars.MICROBLOG_SITE_ID }}
+          theme-id: ${{ vars.MICROBLOG_THEME_ID }}
